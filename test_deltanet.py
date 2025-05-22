@@ -14,6 +14,7 @@ with open(filename, "r") as f:
 # Known dimensions (update if needed)
 B, H, N, D = 8, 8, 128, 16
 size = B * H * N * D
+ITER = 10
 
 q = torch.tensor(floats[0:size], dtype=torch.bfloat16, device='cuda').view(B, H, N, D)
 k = torch.tensor(floats[size:2*size], dtype=torch.bfloat16, device='cuda').view(B, H, N, D)
@@ -27,7 +28,7 @@ o_ref = torch.tensor(floats[3*size:4*size], dtype=torch.bfloat16, device='cuda')
 #                             head_first=False)
 
 # Warmup
-for _ in range(10):
+for _ in range(ITER):
     _ = chunk_delta_rule(
         q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2),
         beta=torch.full((B, N, H), 0.01, dtype=torch.bfloat16, device='cuda'),
@@ -35,23 +36,24 @@ for _ in range(10):
         head_first=False
     )
 
-# Benchmark
+# Benchmark with loop
 start_event = torch.cuda.Event(enable_timing=True)
 end_event = torch.cuda.Event(enable_timing=True)
 
 start_event.record()
-o_fla, _ = chunk_delta_rule(
-    q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2),
-    beta=torch.full((B, N, H), 0.01, dtype=torch.bfloat16, device='cuda'),
-    initial_state=None, output_final_state=False,
-    head_first=False
-)
+for _ in range(ITER):
+    o_fla, _ = chunk_delta_rule(
+        q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2),
+        beta=torch.full((B, N, H), 0.01, dtype=torch.bfloat16, device='cuda'),
+        initial_state=None, output_final_state=False,
+        head_first=False
+    )
 end_event.record()
 
 # Wait for the events to be recorded
 torch.cuda.synchronize()
 
-elapsed_time_ms = start_event.elapsed_time(end_event)
+elapsed_time_ms = start_event.elapsed_time(end_event) / ITER
 print(f"[Triton] Elapsed time: {elapsed_time_ms:.3f} ms")
 
 
